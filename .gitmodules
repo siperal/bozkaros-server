@@ -1,0 +1,3 @@
+[submodule "bozkarcis"]
+	path = bozkarcis
+	url = https://github.com/siperal/bozkarcis.git
