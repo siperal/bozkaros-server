@@ -1,0 +1,9 @@
+[Main]
+Product=Siperal Bozkaros Linux Server
+Version=1.0
+BugURL=https://bozkaros.siperal.com/contact
+IsFinal=True
+UUID=202607132323.x86_64
+Variant=BaseOS
+[Compose]
+Lorax=40.5.13-1
