@@ -2,8 +2,8 @@
 # =============================================================================
 # Bozkaros Server unattended minimal install (Rocky 10 derivative)
 # Bozkaros — CIS Server Level 2 Kickstart
-# Based on: siperal/CIS-RHEL10
-# Target:   CIS Level 2 Server
+# Based on: siperal/bozkarcis
+# Target:   CIS Level 1/2 Server
 # Author:   Murat AYDIN <a@siperal.com>
 # Date:     2026-07-13
 # =============================================================================
@@ -39,9 +39,7 @@ timezone ${TIMEZONE} --utc
 # CIS 3.1: Disable IPv6 if not required (set via kernel args below)
 # Adjust interface name and IP for your environment
 # -----------------------------------------------------------------------------
-network --bootproto=${NETWORK} --ip=${IP} --netmask=255.255.255.0 \
-        --gateway=${GATEWAY} --nameserver=${GATEWAY} \
-        --hostname=${HOSTNAME} --device=${DEVICE} --activate --noipv6
+network --bootproto=${NETWORK} --ip=${IP} --netmask=255.255.255.0 --gateway=${GATEWAY} --nameserver=${GATEWAY} --hostname=${HOSTNAME} --device=${DEVICE} --activate --noipv6
 
 # -----------------------------------------------------------------------------
 # SECURITY POLICY
@@ -57,14 +55,7 @@ network --bootproto=${NETWORK} --ip=${IP} --netmask=255.255.255.0 \
 # CIS 1.4.1 / 1.4.2: GRUB2 password and restricted permissions
 # Hash generated with: grub2-mkpasswd-pbkdf2
 # -----------------------------------------------------------------------------
-bootloader --location=mbr \
-           --boot-drive=sda \
-           --iscrypted \
-           --password=grub.pbkdf2.sha512.10000.${GRUB2_HASH} \
-           --append="audit=1 audit_backlog_limit=8192 ipv6.disable=1 \
-                     init=/usr/lib/systemd/systemd \
-                     page_alloc.shuffle=1 randomize_kstack_offset=on \
-                     vsyscall=none"
+bootloader --location=mbr --boot-drive=sda --iscrypted --password=grub.pbkdf2.sha512.10000.${GRUB2_HASH} --append="audit=1 audit_backlog_limit=8192 ipv6.disable=1 init=/usr/lib/systemd/systemd page_alloc.shuffle=1 randomize_kstack_offset=on vsyscall=none"
 
 # -----------------------------------------------------------------------------
 # PARTITIONING
@@ -86,16 +77,10 @@ zerombr
 clearpart --all --initlabel --drives=sda
 
 # /boot/efi  (UEFI)
-part /boot/efi --fstype=vfat \
-               --size=600 \
-               --ondisk=sda \
-               --fsoptions="umask=0027,fmask=0077"
+part /boot/efi --fstype=vfat --size=600 --ondisk=sda --fsoptions="umask=0027,fmask=0077"
 
 # /boot  (CIS: nodev, nosuid)
-part /boot --fstype=xfs \
-           --size=1024 \
-           --ondisk=sda \
-           --fsoptions="nodev,nosuid"
+part /boot --fstype=xfs --size=1024 --ondisk=sda --fsoptions="nodev,nosuid"
 
 # LVM Physical Volume (remainder of disk)
 part pv.01 --size=1024 --grow --asprimary --ondisk=sda
@@ -104,66 +89,28 @@ part pv.01 --size=1024 --grow --asprimary --ondisk=sda
 volgroup rl_vg pv.01
 
 # / root (16 GB)
-logvol / \
-    --fstype=xfs \
-    --size=16384 \
-    --name=root \
-    --vgname=rl_vg
+logvol / --fstype=xfs --size=16384 --name=root --vgname=rl_vg
 
 # swap (match RAM or use formula; 4GB shown)
-logvol swap \
-    --fstype=swap \
-    --size=4096 \
-    --name=swap \
-    --vgname=rl_vg
+logvol swap --fstype=swap --size=4096 --name=swap --vgname=rl_vg
 
 # /tmp (CIS 1.1.2.x: separate, nodev/nosuid/noexec)
-logvol /tmp \
-    --fstype=xfs \
-    --size=2048 \
-    --name=tmp \
-    --vgname=rl_vg \
-    --fsoptions="nodev,nosuid,noexec"
+logvol /tmp --fstype=xfs --size=2048 --name=tmp --vgname=rl_vg --fsoptions="nodev,nosuid,noexec"
 
 # /var (CIS 1.1.3.x: separate partition)
-logvol /var \
-    --fstype=xfs \
-    --size=10240 \
-    --name=var \
-    --vgname=rl_vg \
-    --fsoptions="nodev"
+logvol /var --fstype=xfs --size=10240 --name=var --vgname=rl_vg --fsoptions="nodev"
 
 # /var/tmp (CIS 1.1.4.x: separate, nodev/nosuid/noexec)
-logvol /var/tmp \
-    --fstype=xfs \
-    --size=2048 \
-    --name=var_tmp \
-    --vgname=rl_vg \
-    --fsoptions="nodev,nosuid,noexec"
+logvol /var/tmp --fstype=xfs --size=2048 --name=var_tmp --vgname=rl_vg --fsoptions="nodev,nosuid,noexec"
 
 # /var/log (CIS 1.1.5.x: separate partition)
-logvol /var/log \
-    --fstype=xfs \
-    --size=4096 \
-    --name=var_log \
-    --vgname=rl_vg \
-    --fsoptions="nodev,nosuid,noexec"
+logvol /var/log --fstype=xfs --size=4096 --name=var_log --vgname=rl_vg --fsoptions="nodev,nosuid,noexec"
 
 # /var/log/audit (CIS 1.1.6.x: separate partition)
-logvol /var/log/audit \
-    --fstype=xfs \
-    --size=2048 \
-    --name=var_log_audit \
-    --vgname=rl_vg \
-    --fsoptions="nodev,nosuid,noexec"
+logvol /var/log/audit --fstype=xfs --size=2048 --name=var_log_audit --vgname=rl_vg --fsoptions="nodev,nosuid,noexec"
 
 # /home (CIS 1.1.7.x: separate, nodev)
-logvol /home \
-    --fstype=xfs \
-    --size=4096 \
-    --name=home \
-    --vgname=rl_vg \
-    --fsoptions="nodev,nosuid"
+logvol /home --fstype=xfs --size=4096 --name=home --vgname=rl_vg --fsoptions="nodev,nosuid"
 
 # -----------------------------------------------------------------------------
 # SELINUX
@@ -187,11 +134,7 @@ rootpw --lock
 # Create an admin user
 # Generate hash: python3 -c "import crypt; print(crypt.crypt('YourPass', crypt.mksalt(crypt.METHOD_SHA512)))"
 # Password hash is generated in ./auth.sh
-user --name=bozkaros \
-     --groups=wheel \
-     --iscrypted \
-     --password=${BOZKAROS_HASH} \
-     --gecos="Security Admin"
+user --name=bozkaros --groups=wheel --iscrypted --password=${BOZKAROS_HASH} --gecos="Security Admin"
 sshkey --username=bozkaros  "${BOZKAROS_PUBLIC_KEY}"
 
 # SSH group for CIS access control (CIS 5.2.2)
@@ -339,7 +282,7 @@ echo "[CIS] Configuring chrony NTP..."
 
 # =============================================================================
 # POST-INSTALL SCRIPT (chroot=no for network access)
-# Runs the siperal/CIS-RHEL10 role for Level 2 hardening
+# Runs the siperal/bozkarcis role for Level 2 hardening
 # =============================================================================
 %post --log=/root/ks-post-cis.log
 #!/bin/bash
@@ -393,14 +336,13 @@ chown root:root /etc/chrony.conf
 chmod 640 /etc/chrony.conf
 
 # -----------------------------------------------------------------------------
-# 7. INSTALL & RUN siperal/CIS-RHEL10 (Level 2)
+# 7. INSTALL & RUN siperal/bozkarcis (Level 2)
 # -----------------------------------------------------------------------------
-echo "[CIS] Installing Ansible Galaxy role: siperal/CIS-RHEL10..."
+echo "[CIS] Installing Ansible Galaxy role: siperal/bozkarcis..."
 pip3 install --quiet ansible-core
 
 # Install role from Galaxy
-ansible-galaxy role install siperal.cis_rhel10 \
-    --roles-path /etc/ansible/roles/
+ansible-galaxy role install siperal.cis_rhel10 --roles-path /etc/ansible/roles
 
 # Create inventory
 cat > /tmp/cis_inventory.ini << 'INV'
@@ -412,91 +354,91 @@ INV
 mkdir -p /tmp/cis_vars
 cat > /tmp/cis_vars/level2_overrides.yml << 'VARS'
 # ===========================================================================
-# siperal/CIS-RHEL10 — Level 2 Server Variable Overrides
-# Reference: https://github.com/siperal/CIS-RHEL10 -> /defaults/main.yml
+# siperal/bozkarcis — Level 2 Server Variable Overrides
+# Reference: https://github.com/siperal/bozkarcis -> /defaults/main.yml
 # ===========================================================================
 
-rhel10cis_level: 2
-rhel10cis_install_type: server
+bozkarcis_level: 2
+bozkarcis_install_type: server
 
 # Audit settings
 run_audit: true
 
 # --- Section 1: Initial Setup ---
-rhel10cis_rule_1_1_1_1: true    # cramfs disabled
-rhel10cis_rule_1_1_1_2: true    # freevxfs disabled
-rhel10cis_rule_1_1_1_3: true    # hfs disabled
-rhel10cis_rule_1_1_1_4: true    # hfsplus disabled
-rhel10cis_rule_1_1_1_5: true    # jffs2 disabled
-rhel10cis_rule_1_1_1_6: true    # squashfs disabled
-rhel10cis_rule_1_1_1_7: true    # udf disabled
-rhel10cis_rule_1_1_1_8: true    # usb-storage disabled (Level 2)
+bozkarcis_rule_1_1_1_1: true    # cramfs disabled
+bozkarcis_rule_1_1_1_2: true    # freevxfs disabled
+bozkarcis_rule_1_1_1_3: true    # hfs disabled
+bozkarcis_rule_1_1_1_4: true    # hfsplus disabled
+bozkarcis_rule_1_1_1_5: true    # jffs2 disabled
+bozkarcis_rule_1_1_1_6: true    # squashfs disabled
+bozkarcis_rule_1_1_1_7: true    # udf disabled
+bozkarcis_rule_1_1_1_8: true    # usb-storage disabled (Level 2)
 
 # Partition mount option enforcement (already set via Kickstart)
-rhel10cis_rule_1_1_2_1: true    # /tmp separate
-rhel10cis_rule_1_1_2_2: true    # /tmp nodev
-rhel10cis_rule_1_1_2_3: true    # /tmp nosuid
-rhel10cis_rule_1_1_2_4: true    # /tmp noexec
-rhel10cis_rule_1_1_8_1: true    # /dev/shm nodev
-rhel10cis_rule_1_1_8_2: true    # /dev/shm nosuid
-rhel10cis_rule_1_1_8_3: true    # /dev/shm noexec
+bozkarcis_rule_1_1_2_1: true    # /tmp separate
+bozkarcis_rule_1_1_2_2: true    # /tmp nodev
+bozkarcis_rule_1_1_2_3: true    # /tmp nosuid
+bozkarcis_rule_1_1_2_4: true    # /tmp noexec
+bozkarcis_rule_1_1_8_1: true    # /dev/shm nodev
+bozkarcis_rule_1_1_8_2: true    # /dev/shm nosuid
+bozkarcis_rule_1_1_8_3: true    # /dev/shm noexec
 
 # Bootloader
-rhel10cis_set_boot_pass: true
-rhel10cis_bootloader_password_hash: "grub.pbkdf2.sha512.10000.${GRUB2_HASH}"
+bozkarcis_set_boot_pass: true
+bozkarcis_bootloader_password_hash: "grub.pbkdf2.sha512.10000.${GRUB2_HASH}"
 
 # FIPS (already enabled above, role will validate)
-rhel10cis_fips_enabled: true
+bozkarcis_fips_enabled: true
 
 # Crypto policy
-rhel10cis_crypto_policy: "FIPS"
+bozkarcis_crypto_policy: "FIPS"
 
 # --- Section 2: Services ---
-rhel10cis_avahi_server: false
-rhel10cis_cups_server: false
-rhel10cis_dhcp_server: false
-rhel10cis_ldap_server: false
-rhel10cis_nfs_server: false
-rhel10cis_dns_server: false
-rhel10cis_ftp_server: false
-rhel10cis_http_server: false
-rhel10cis_imap_pop3_server: false
-rhel10cis_samba_server: false
-rhel10cis_squid_proxy_server: false
-rhel10cis_snmp_server: false
-rhel10cis_rsync_server: false
-rhel10cis_nis_server: false
-rhel10cis_telnet_server: false
-rhel10cis_tftp_server: false
-rhel10cis_xinetd_server: false
+bozkarcis_avahi_server: false
+bozkarcis_cups_server: false
+bozkarcis_dhcp_server: false
+bozkarcis_ldap_server: false
+bozkarcis_nfs_server: false
+bozkarcis_dns_server: false
+bozkarcis_ftp_server: false
+bozkarcis_http_server: false
+bozkarcis_imap_pop3_server: false
+bozkarcis_samba_server: false
+bozkarcis_squid_proxy_server: false
+bozkarcis_snmp_server: false
+bozkarcis_rsync_server: false
+bozkarcis_nis_server: false
+bozkarcis_telnet_server: false
+bozkarcis_tftp_server: false
+bozkarcis_xinetd_server: false
 
 # --- Section 3: Network ---
-rhel10cis_ipv6_required: false    # Disable IPv6 (Level 2)
-rhel10cis_firewall: firewalld
-rhel10cis_firewall_default_zone: "drop"  # Level 2: default drop
-rhel10cis_allow_manager_access: true
-rhel10cis_sshd_limited_access_group: "sshallowed"
+bozkarcis_ipv6_required: false    # Disable IPv6 (Level 2)
+bozkarcis_firewall: firewalld
+bozkarcis_firewall_default_zone: "drop"  # Level 2: default drop
+bozkarcis_allow_manager_access: true
+bozkarcis_sshd_limited_access_group: "sshallowed"
 
 # Wireless disabled on servers (Level 2)
-rhel10cis_wireless_disable: true
+bozkarcis_wireless_disable: true
 
 # --- Section 4: Auditing ---
-rhel10cis_auditd_max_log_file: 32
-rhel10cis_auditd_max_log_file_action: keep_logs
-rhel10cis_auditd_space_left_action: email
-rhel10cis_auditd_admin_space_left_action: halt
-rhel10cis_auditd_action_mail_acct: root
-rhel10cis_auditd_disk_full_action: halt
-rhel10cis_auditd_disk_error_action: halt
+bozkarcis_auditd_max_log_file: 32
+bozkarcis_auditd_max_log_file_action: keep_logs
+bozkarcis_auditd_space_left_action: email
+bozkarcis_auditd_admin_space_left_action: halt
+bozkarcis_auditd_action_mail_acct: root
+bozkarcis_auditd_disk_full_action: halt
+bozkarcis_auditd_disk_error_action: halt
 
 # --- Section 5: Access, Auth, Privilege ---
-rhel10cis_set_password_expiry: true
-rhel10cis_pass_max_days: 365
-rhel10cis_pass_min_days: 1
-rhel10cis_pass_warn_age: 7
-rhel10cis_pass_inactive_days: 30   # Level 2
+bozkarcis_set_password_expiry: true
+bozkarcis_pass_max_days: 365
+bozkarcis_pass_min_days: 1
+bozkarcis_pass_warn_age: 7
+bozkarcis_pass_inactive_days: 30   # Level 2
 
-rhel10cis_password_complexity:
+bozkarcis_password_complexity:
   minlen: 14
   minclass: 4
   dcredit: -1
@@ -507,17 +449,17 @@ rhel10cis_password_complexity:
   maxsequence: 3    # Level 2
   dictcheck: 1
 
-rhel10cis_lock_out_after_n_attempts: 5
-rhel10cis_fail_lock_unlock_time: 900   # Level 2: 15 minutes
+bozkarcis_lock_out_after_n_attempts: 5
+bozkarcis_fail_lock_unlock_time: 900   # Level 2: 15 minutes
 
 # sudo settings (Level 2)
-rhel10cis_sudo_log: true
-rhel10cis_sudo_logfile: "/var/log/sudo.log"
-rhel10cis_sudo_reauthentication: true   # Level 2: timestamp_timeout
-rhel10cis_sudo_timestamp_timeout: 0     # Level 2: re-auth every time
+bozkarcis_sudo_log: true
+bozkarcis_sudo_logfile: "/var/log/sudo.log"
+bozkarcis_sudo_reauthentication: true   # Level 2: timestamp_timeout
+bozkarcis_sudo_timestamp_timeout: 0     # Level 2: re-auth every time
 
 # SSH hardening
-rhel10cis_sshd:
+bozkarcis_sshd:
   ClientAliveInterval: 300
   ClientAliveCountMax: 3         # Level 2
   LoginGraceTime: 60
@@ -539,9 +481,9 @@ rhel10cis_sshd:
   LogLevel: VERBOSE              # Level 2
 
 # --- Section 6: System Maintenance ---
-rhel10cis_passwd_perms: true
-rhel10cis_shadow_perms: true
-rhel10cis_group_perms: true
+bozkarcis_passwd_perms: true
+bozkarcis_shadow_perms: true
+bozkarcis_group_perms: true
 VARS
 
 # Create the Ansible playbook
@@ -560,14 +502,8 @@ cat > /tmp/run_cis_level2.yml << 'PLAY'
     - level2_server
 PLAY
 
-echo "[CIS] Running siperal/CIS-RHEL10 with Level 2 tags..."
-ansible-playbook \
-    -i /tmp/cis_inventory.ini \
-    /tmp/run_cis_level2.yml \
-    --tags "level1_server,level2_server" \
-    --skip-tags "mount_option" \
-    -v \
-    2>&1 | tee /root/ansible-cis-level2.log
+echo "[CIS] Running siperal/bozkarcis with Level 2 tags..."
+ansible-playbook -i /tmp/cis_inventory.ini /tmp/run_cis_level2.yml --tags "level1_server,level2_server" --skip-tags "mount_option" -v 2>&1 | tee /root/ansible-cis-level2.log
 
 echo "[CIS] Ansible hardening run complete. Check /root/ansible-cis-level2.log"
 

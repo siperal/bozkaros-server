@@ -251,7 +251,10 @@ echo "Preparing Kickstart file..."
 
 echo "Exchange secret values..."
 KS_FILE="$WORKDIR/bozkaros-server.ks"
-envsubst < "cis.ks" > "$KS_FILE"
+. .env
+VARS='${LOCALE}${KEYMAP}${TIMEZONE}${NETWORK}${IP}${GATEWAY}${DEVICE}${HOSTNAME}${GRUB2_HASH}${BOZKAROS_HASH}${BOZKAROS_PUBLIC_KEY}'
+export $(grep -v '^#' .env | xargs)
+envsubst "$VARS" < "cis.ks" > "$KS_FILE"
 
 echo "Validating KS file..."
 ksvalidator -v RHEL10 "$KS_FILE"

@@ -1,7 +1,12 @@
+bin
 build
 img
 iso
 mnt
+
 repo/server
 repo/burokat
+branding/repodata
+conf/repodata
+rpms
 rpmbuild
