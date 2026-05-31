@@ -28,6 +28,7 @@ repo --name=branding --baseurl=file:///run/install/repo/branding/ --install
 repo --name=conf --baseurl=file:///run/install/repo/conf/ --install
 repo --name=cis --baseurl=file:///run/install/repo/cis/ --install
 repo --name=collections --baseurl=file:///run/install/repo/collections/ --install
+repo --name=bin --baseurl=file:///run/install/repo/bin/ --install
 
 # -----------------------------------------------------------------------------
 # LANGUAGE, KEYBOARD, TIMEZONE
@@ -288,6 +289,7 @@ BRANDING=/run/install/repo/branding
 CONF=/run/install/repo/conf
 CIS=/run/install/repo/cis
 COLLECTIONS=/run/install/repo/collections
+BIN=/run/install/repo/bin
 
 # -----------------------------------------------------------------------------
 # 1. BANNER / MOTD (CIS 1.7.x: Warning banners)
@@ -310,6 +312,7 @@ echo "[CIS] Configuring chrony NTP..."
 echo "Copying Ansible rules..."
 mkdir -p ${SYSROOT}/etc/ansible/roles/
 tar -xzf ${CIS}/bozkarcis.tar.gz -C ${SYSROOT}/etc/ansible/roles/
+mv ${SYSROOT}/etc/ansible/roles/audit ${SYSROOT}/opt
 \cp ${CONF}/ansible.cfg ${SYSROOT}/etc/ansible/ansible.cfg
 \cp ${CONF}/cis_inventory.ini ${SYSROOT}/etc/ansible/cis_inventory.ini
 \cp ${CONF}/cis_vars_delta.yml ${SYSROOT}/etc/ansible/cis_vars_delta.yml
@@ -321,6 +324,12 @@ tar -xzf ${CIS}/bozkarcis.tar.gz -C ${SYSROOT}/etc/ansible/roles/
 # -----------------------------------------------------------------------------
 echo "AIDE daily check..."
 \cp ${CONF}/aide-check ${SYSROOT}/etc/cron.daily/aide-check
+
+# -----------------------------------------------------------------------------
+# 5. BINARIES
+# -----------------------------------------------------------------------------
+echo "Copying binaries..."
+\cp ${BIN}/goss-linux-amd64 ${SYSROOT}/usr/local/bin/goss
 
 %end
 

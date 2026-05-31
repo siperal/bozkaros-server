@@ -260,6 +260,7 @@ createrepo_c ./branding/
 createrepo_c ./conf/
 createrepo_c ./cis/
 createrepo_c ./collections
+createrepo_c ./bin
 
 
 # -----------------------------------------------------------------------------
@@ -298,6 +299,7 @@ sudo mkksiso \
   --add ./conf \
   --add ./cis \
   --add ./collections \
+  --add ./bin \
   -V "$BOZKAROS_VOLID" \
   "$WORKDIR/$RBRANDED_ISO" \
   "$WORKDIR/$BOZKAROS_ISO"

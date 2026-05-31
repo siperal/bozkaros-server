@@ -1,7 +1,7 @@
 Name:           bozkaros-release
 Version:        1.0
 Release:        1.0el1
-Summary:        Siperal Bozkaros Linux Server release files
+Summary:        Siperal Bozkaros release files
 License:        BSD-3-Clause
 Group:          System Environment/Base
 BuildArch:      noarch

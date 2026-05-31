@@ -1,7 +1,7 @@
 Name:           bozkaros-logos
 Version:        1.0
 Release:        1.0el1
-Summary:        Bozkaros Linux artwork
+Summary:        Siperal Bozkaros Linux artwork
 License:        BSD-3-Clause
 Group:          System Environment/Base
 BuildArch:      noarch
@@ -15,7 +15,7 @@ Provides:       system-logos
 Obsoletes:      rocky-logos
 
 %description
-Bozkaros Linux artwork for the installer and bootloader.
+Siperal Bozkaros Linux artwork for the installer and bootloader.
 
 %prep
 # nothing
