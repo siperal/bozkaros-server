@@ -3,7 +3,7 @@
 # Bozkaros Server unattended minimal install (Rocky 10 derivative)
 # Bozkaros — CIS Server Level 2 Kickstart
 # Based on: siperal/bozkarcis
-# Target:   CIS Level 1/2 Server
+# Target:   CIS Level 2 Server
 # Author:   Murat AYDIN <a@siperal.com>
 # Date:     2026-07-13
 # =============================================================================
@@ -22,9 +22,12 @@ eula --agreed
 # -----------------------------------------------------------------------------
 # REPOS
 # -----------------------------------------------------------------------------
+repo --name=baseos --baseurl=file:///run/install/repo/server --install
 repo --name=rpms --baseurl=file:///run/install/repo/rpms/ --install
 repo --name=branding --baseurl=file:///run/install/repo/branding/ --install
 repo --name=conf --baseurl=file:///run/install/repo/conf/ --install
+repo --name=cis --baseurl=file:///run/install/repo/cis/ --install
+repo --name=collections --baseurl=file:///run/install/repo/collections/ --install
 
 # -----------------------------------------------------------------------------
 # LANGUAGE, KEYBOARD, TIMEZONE
@@ -42,12 +45,15 @@ timezone ${TIMEZONE} --utc
 network --bootproto=${NETWORK} --ip=${IP} --netmask=255.255.255.0 --gateway=${GATEWAY} --nameserver=${GATEWAY} --hostname=${HOSTNAME} --device=${DEVICE} --activate --noipv6
 
 # -----------------------------------------------------------------------------
-# SECURITY POLICY
-# CIS Level 2 Server — apply OpenSCAP profile during install as supplementary
+# OSCAP ANACONDA ADD-ON
+# Runs the CIS Level 2 Server profile natively inside Anaconda during install.
+# This is NOT a post-install step — it runs in the installer environment with
+# full knowledge of the partition layout, before the first boot.
+# Handles: kernel params, services, sysctl, PAM, SSH, audit rules, etc.
 # -----------------------------------------------------------------------------
-%addon org_fedora_oscap
+%addon com_redhat_oscap
     content-type = scap-security-guide
-    profile = xccdf_org.ssgproject.content_profile_cis_server_l2
+    profile      = xccdf_org.ssgproject.content_profile_cis_server_l2
 %end
 
 # -----------------------------------------------------------------------------
@@ -55,13 +61,14 @@ network --bootproto=${NETWORK} --ip=${IP} --netmask=255.255.255.0 --gateway=${GA
 # CIS 1.4.1 / 1.4.2: GRUB2 password and restricted permissions
 # Hash generated with: grub2-mkpasswd-pbkdf2
 # -----------------------------------------------------------------------------
-bootloader --location=mbr --boot-drive=sda --iscrypted --password=grub.pbkdf2.sha512.10000.${GRUB2_HASH} --append="audit=1 audit_backlog_limit=8192 ipv6.disable=1 init=/usr/lib/systemd/systemd page_alloc.shuffle=1 randomize_kstack_offset=on vsyscall=none"
+bootloader --location=mbr --boot-drive=${DISK} --iscrypted --password=grub.pbkdf2.sha512.10000.${GRUB2_HASH} --append="fips=1 audit=1 audit_backlog_limit=8192 ipv6.disable=1 page_alloc.shuffle=1 randomize_kstack_offset=on vsyscall=none"
+# init=/usr/lib/systemd/systemd
 
 # -----------------------------------------------------------------------------
 # PARTITIONING
 # CIS 1.1.x: Separate partitions with hardened mount options
 #
-# Disk assumptions: /dev/sda, 60GB+ recommended for server
+# Disk assumptions: /dev/${DISK}, 60GB+ recommended for server
 # Adjust sizes to your requirements.
 #
 # CIS Controls addressed here:
@@ -74,31 +81,38 @@ bootloader --location=mbr --boot-drive=sda --iscrypted --password=grub.pbkdf2.sh
 #  1.1.8.1 - /dev/shm nodev/nosuid/noexec (tmpfs, handled post-install)
 # -----------------------------------------------------------------------------
 zerombr
-clearpart --all --initlabel --drives=sda
+clearpart --all --initlabel --drives=${DISK}
 
+# ---------------------------------------------------------------
+# Required for BIOS + GPT: 1 MiB biosboot partition (EF02 type)
+# No file system, no formatting — only for GRUB2 kernel
+# CIS: This partition is required for GRUB2 installation, no security risk
+# ---------------------------------------------------------------
+part biosboot --fstype=biosboot --size=1 --ondisk=${DISK}
+# Bios boot replaces efi.
 # /boot/efi  (UEFI)
-part /boot/efi --fstype=vfat --size=600 --ondisk=sda --fsoptions="umask=0027,fmask=0077"
+# part /boot/efi --fstype=vfat --size=600 --ondisk=${DISK} --fsoptions="umask=0027,fmask=0077"
 
 # /boot  (CIS: nodev, nosuid)
-part /boot --fstype=xfs --size=1024 --ondisk=sda --fsoptions="nodev,nosuid"
+part /boot --fstype=xfs --size=1024 --ondisk=${DISK} --fsoptions="nodev,nosuid"
 
 # LVM Physical Volume (remainder of disk)
-part pv.01 --size=1024 --grow --asprimary --ondisk=sda
+part pv.01 --size=1024 --grow --asprimary --ondisk=${DISK}
 
 # LVM Volume Group
 volgroup rl_vg pv.01
 
 # / root (16 GB)
-logvol / --fstype=xfs --size=16384 --name=root --vgname=rl_vg
+logvol / --fstype=xfs --size=4096 --name=root --vgname=rl_vg
 
-# swap (match RAM or use formula; 4GB shown)
+# swap (TODO match RAM or use formula; 4GB shown)
 logvol swap --fstype=swap --size=4096 --name=swap --vgname=rl_vg
 
 # /tmp (CIS 1.1.2.x: separate, nodev/nosuid/noexec)
 logvol /tmp --fstype=xfs --size=2048 --name=tmp --vgname=rl_vg --fsoptions="nodev,nosuid,noexec"
 
 # /var (CIS 1.1.3.x: separate partition)
-logvol /var --fstype=xfs --size=10240 --name=var --vgname=rl_vg --fsoptions="nodev"
+logvol /var --fstype=xfs --size=16384 --name=var --vgname=rl_vg --fsoptions="nodev"
 
 # /var/tmp (CIS 1.1.4.x: separate, nodev/nosuid/noexec)
 logvol /var/tmp --fstype=xfs --size=2048 --name=var_tmp --vgname=rl_vg --fsoptions="nodev,nosuid,noexec"
@@ -141,6 +155,12 @@ sshkey --username=bozkaros  "${BOZKAROS_PUBLIC_KEY}"
 group --name=sshallowed --gid=1500
 
 
+# -----------------------------------------------------------------------------
+# SERVICES
+# -----------------------------------------------------------------------------
+services --enabled=sshd,chronyd
+
+
 # =============================================================================
 # =============================================================================
 
@@ -150,7 +170,7 @@ group --name=sshallowed --gid=1500
 # CIS 2.x: Minimal install, remove unnecessary packages
 # Level 2 requires specific packages for auditing
 # -----------------------------------------------------------------------------
-%packages --ignoremissing
+%packages
 @^minimal-environment
 
 # Derivative
@@ -160,11 +180,17 @@ group --name=sshallowed --gid=1500
 bozkaros-release
 bozkaros-logos
 
-# Required for Ansible post-install
+# Base packages
 ansible-core
+git
+openssh
 python3
 python3-pip
-git
+tar
+
+# Required by OSCAP Anaconda Add-on
+openscap-scanner
+scap-security-guide
 
 # CIS 4.x: Auditing and logging
 audit
@@ -182,11 +208,10 @@ libselinux
 libselinux-utils
 policycoreutils
 policycoreutils-python-utils
-setools-console
 
 # PAM and authentication
 pam
-pam_pwquality
+libpwquality
 authselect
 sssd-common
 
@@ -201,8 +226,8 @@ crypto-policies
 crypto-policies-scripts
 
 # FIPS-related
-dracut-fips
-dracut-fips-aesni
+dracut
+dracut-config-generic
 
 # Explicitly remove - CIS 2.2.x / 2.3.x
 -avahi
@@ -255,9 +280,14 @@ echo "Starting CIS Level 2 Pre-Install configuration..."
 # NOCHROOT
 # -----------------------------------------------------------------------------
 %post --nochroot --log=/root/ks-post-nochroot.log
+#!/bin/bash
+set -euo pipefail
+
 SYSROOT=/mnt/sysimage
 BRANDING=/run/install/repo/branding
 CONF=/run/install/repo/conf
+CIS=/run/install/repo/cis
+COLLECTIONS=/run/install/repo/collections
 
 # -----------------------------------------------------------------------------
 # 1. BANNER / MOTD (CIS 1.7.x: Warning banners)
@@ -266,15 +296,33 @@ echo "[CIS] Configuring login banners..."
 \cp ${BRANDING}/motd ${SYSROOT}/etc/motd
 \cp ${BRANDING}/issue ${SYSROOT}/etc/issue
 \cp ${BRANDING}/issue ${SYSROOT}/etc/issue.net
+\cp ${BRANDING}/lsb-release ${SYSROOT}/etc/lsb-release
 
 # -----------------------------------------------------------------------------
 # 2. CHRONY / NTP (CIS 2.1.1)
 # -----------------------------------------------------------------------------
 echo "[CIS] Configuring chrony NTP..."
-\cp ${CONF}/chrony.conf /etc/chrony.conf
+\cp ${CONF}/chrony.conf ${SYSROOT}/etc/chrony.conf
+
+# -----------------------------------------------------------------------------
+# 3. ANSIBLE
+# -----------------------------------------------------------------------------
+echo "Copying Ansible rules..."
+mkdir -p ${SYSROOT}/etc/ansible/roles/
+tar -xzf ${CIS}/bozkarcis.tar.gz -C ${SYSROOT}/etc/ansible/roles/
+\cp ${CONF}/ansible.cfg ${SYSROOT}/etc/ansible/ansible.cfg
+\cp ${CONF}/cis_inventory.ini ${SYSROOT}/etc/ansible/cis_inventory.ini
+\cp ${CONF}/cis_vars_delta.yml ${SYSROOT}/etc/ansible/cis_vars_delta.yml
+\cp ${CONF}/run_cis_delta.yml ${SYSROOT}/etc/ansible/run_cis_delta.yml
+\cp -r ${COLLECTIONS}/. ${SYSROOT}/etc/ansible/collections
+
+# -----------------------------------------------------------------------------
+# 4. AIDE
+# -----------------------------------------------------------------------------
+echo "AIDE daily check..."
+\cp ${CONF}/aide-check ${SYSROOT}/etc/cron.daily/aide-check
 
 %end
-
 
 # =============================================================================
 # =============================================================================
@@ -283,6 +331,15 @@ echo "[CIS] Configuring chrony NTP..."
 # =============================================================================
 # POST-INSTALL SCRIPT (chroot=no for network access)
 # Runs the siperal/bozkarcis role for Level 2 hardening
+# The OSCAP addon already applied CIS Level 2 during install.
+# This %post handles ONLY the controls that scap-security-guide does NOT cover:
+#   - FIPS mode enablement (requires initramfs rebuild)
+#   - /dev/shm fstab hardening
+#   - Login banners
+#   - Chrony config
+#   - GRUB config file permissions
+#   - Ansible delta run for siperal/bozkarcis controls beyond SSG
+#   - AIDE database initialization
 # =============================================================================
 %post --log=/root/ks-post-cis.log
 #!/bin/bash
@@ -292,25 +349,53 @@ echo "============================================================"
 echo "  Siperal Bozkaros - CIS Level 2 Post-Install Hardening"
 echo "============================================================"
 
+export LC_ALL=C.UTF-8
+export LANG=C.UTF-8
+
+# -----------------------------------------------------------------------------
+# 0. INSTALL ANSIBLE
+#python3 -m pip install --user pipx
+#python3 -m pipx ensurepath
+#pipx install ansible-core
+
 # -----------------------------------------------------------------------------
 # 1. FIPS MODE (CIS 1.3.x / Level 2 requirement)
-# Must be enabled before first boot; fips-mode-setup handles initramfs rebuild
+# FIPS Step 1: Get UUID of /boot partition (required alongside fips=1)
+# FIPS Step 2: Add fips=1 + boot=UUID to all installed kernels
 # -----------------------------------------------------------------------------
-echo "[CIS] Enabling FIPS 140-3 mode..."
-fips-mode-setup --enable || echo "WARN: fips-mode-setup failed, check dracut-fips"
+echo "[CIS] Enabling FIPS mode (Rocky 10 method: fips=1 kernel parameter)..."
+
+BOOT_UUID=$(findmnt /boot -no UUID)
+if [ -z "${BOOT_UUID}" ]; then
+    echo "WARN: Could not determine /boot UUID — FIPS kernel arg may be incomplete"
+else
+    echo "[CIS] /boot UUID: ${BOOT_UUID}"
+fi
+
+grubby --update-kernel=ALL --args="fips=1 boot=UUID=${BOOT_UUID}"
 
 # -----------------------------------------------------------------------------
 # 2. CRYPTO POLICY (CIS 1.7.x: FIPS or FUTURE policy for Level 2)
+# FIPS Step 3: Set crypto policy to FIPS
+# FIPS Step 4: Touch /etc/system-fips (signals userspace FIPS state)
+# FIPS Step 5: Rebuild initramfs with FIPS support
 # -----------------------------------------------------------------------------
 echo "[CIS] Setting system-wide crypto policy to FIPS..."
 update-crypto-policies --set FIPS
+
+touch /etc/system-fips
+
+# dracut in Rocky 10 has the FIPS module built-in — no extra package needed
+dracut --force --kver "$(ls /lib/modules | tail -1)"
+
+echo "[CIS] FIPS mode configured. Verify after reboot: cat /proc/sys/crypto/fips_enabled"
 
 # -----------------------------------------------------------------------------
 # 3. /dev/shm hardening (CIS 1.1.8.x)
 # Ansible role handles /etc/fstab but this ensures it at install time
 # -----------------------------------------------------------------------------
 echo "[CIS] Hardening /dev/shm in /etc/fstab..."
-echo "tmpfs /dev/shm tmpfs defaults,nodev,nosuid,noexec 0 0" >> /etc/fstab
+grep -q "/dev/shm" /etc/fstab || echo "tmpfs /dev/shm tmpfs defaults,nodev,nosuid,noexec 0 0" >> /etc/fstab
 
 # -----------------------------------------------------------------------------
 # 4. GRUB config permissions (CIS 1.4.1)
@@ -336,202 +421,42 @@ chown root:root /etc/chrony.conf
 chmod 640 /etc/chrony.conf
 
 # -----------------------------------------------------------------------------
-# 7. INSTALL & RUN siperal/bozkarcis (Level 2)
+# 7. CIS HARDENING
+# ANSIBLE DELTA RUN — controls in RHEL10-CIS role beyond scap-security-guide
+# Runs in the installed system chroot using the locally cloned role.
+# Since OSCAP already applied the base profile, this targets only the delta:
+#   - usb-storage disable (Level 2 specific)
+#   - sudo timestamp_timeout=0
+#   - SSH LogLevel VERBOSE, AllowTcpForwarding no
+#   - auditd disk_full/error actions
+#   - firewalld default-zone drop
 # -----------------------------------------------------------------------------
-echo "[CIS] Installing Ansible Galaxy role: siperal/bozkarcis..."
-pip3 install --quiet ansible-core
 
-# Install role from Galaxy
-ansible-galaxy role install siperal.cis_rhel10 --roles-path /etc/ansible/roles
+ANSIBLE_ROLES="/etc/ansible/roles/bozkarcis"
+if [ -d "${ANSIBLE_ROLES}/tasks" ]; then
+    echo "[CIS] Running Bozkarcis Ansible delta for Level 2 controls..."
 
-# Create inventory
-cat > /tmp/cis_inventory.ini << 'INV'
-[local]
-localhost ansible_connection=local
-INV
+    ansible-playbook -i /etc/ansible/cis_inventory.ini /etc/ansible/run_cis_delta.yml --tags "level1_server,level2_server" --skip-tags "mount_option,tmp_mount,vartmp_mount,rule_1.1.2.1,rule_1.1.3.1,rule_1.1.4.1,rule_1.1.5.1,rule_1.1.6.1,rule_1.1.7.1" -v 2>&1 | tee /root/ansible-cis-delta.log
 
-# Create Level 2 variable overrides
-mkdir -p /tmp/cis_vars
-cat > /tmp/cis_vars/level2_overrides.yml << 'VARS'
-# ===========================================================================
-# siperal/bozkarcis — Level 2 Server Variable Overrides
-# Reference: https://github.com/siperal/bozkarcis -> /defaults/main.yml
-# ===========================================================================
-
-bozkarcis_level: 2
-bozkarcis_install_type: server
-
-# Audit settings
-run_audit: true
-
-# --- Section 1: Initial Setup ---
-bozkarcis_rule_1_1_1_1: true    # cramfs disabled
-bozkarcis_rule_1_1_1_2: true    # freevxfs disabled
-bozkarcis_rule_1_1_1_3: true    # hfs disabled
-bozkarcis_rule_1_1_1_4: true    # hfsplus disabled
-bozkarcis_rule_1_1_1_5: true    # jffs2 disabled
-bozkarcis_rule_1_1_1_6: true    # squashfs disabled
-bozkarcis_rule_1_1_1_7: true    # udf disabled
-bozkarcis_rule_1_1_1_8: true    # usb-storage disabled (Level 2)
-
-# Partition mount option enforcement (already set via Kickstart)
-bozkarcis_rule_1_1_2_1: true    # /tmp separate
-bozkarcis_rule_1_1_2_2: true    # /tmp nodev
-bozkarcis_rule_1_1_2_3: true    # /tmp nosuid
-bozkarcis_rule_1_1_2_4: true    # /tmp noexec
-bozkarcis_rule_1_1_8_1: true    # /dev/shm nodev
-bozkarcis_rule_1_1_8_2: true    # /dev/shm nosuid
-bozkarcis_rule_1_1_8_3: true    # /dev/shm noexec
-
-# Bootloader
-bozkarcis_set_boot_pass: true
-bozkarcis_bootloader_password_hash: "grub.pbkdf2.sha512.10000.${GRUB2_HASH}"
-
-# FIPS (already enabled above, role will validate)
-bozkarcis_fips_enabled: true
-
-# Crypto policy
-bozkarcis_crypto_policy: "FIPS"
-
-# --- Section 2: Services ---
-bozkarcis_avahi_server: false
-bozkarcis_cups_server: false
-bozkarcis_dhcp_server: false
-bozkarcis_ldap_server: false
-bozkarcis_nfs_server: false
-bozkarcis_dns_server: false
-bozkarcis_ftp_server: false
-bozkarcis_http_server: false
-bozkarcis_imap_pop3_server: false
-bozkarcis_samba_server: false
-bozkarcis_squid_proxy_server: false
-bozkarcis_snmp_server: false
-bozkarcis_rsync_server: false
-bozkarcis_nis_server: false
-bozkarcis_telnet_server: false
-bozkarcis_tftp_server: false
-bozkarcis_xinetd_server: false
-
-# --- Section 3: Network ---
-bozkarcis_ipv6_required: false    # Disable IPv6 (Level 2)
-bozkarcis_firewall: firewalld
-bozkarcis_firewall_default_zone: "drop"  # Level 2: default drop
-bozkarcis_allow_manager_access: true
-bozkarcis_sshd_limited_access_group: "sshallowed"
-
-# Wireless disabled on servers (Level 2)
-bozkarcis_wireless_disable: true
-
-# --- Section 4: Auditing ---
-bozkarcis_auditd_max_log_file: 32
-bozkarcis_auditd_max_log_file_action: keep_logs
-bozkarcis_auditd_space_left_action: email
-bozkarcis_auditd_admin_space_left_action: halt
-bozkarcis_auditd_action_mail_acct: root
-bozkarcis_auditd_disk_full_action: halt
-bozkarcis_auditd_disk_error_action: halt
-
-# --- Section 5: Access, Auth, Privilege ---
-bozkarcis_set_password_expiry: true
-bozkarcis_pass_max_days: 365
-bozkarcis_pass_min_days: 1
-bozkarcis_pass_warn_age: 7
-bozkarcis_pass_inactive_days: 30   # Level 2
-
-bozkarcis_password_complexity:
-  minlen: 14
-  minclass: 4
-  dcredit: -1
-  ucredit: -1
-  ocredit: -1
-  lcredit: -1
-  maxrepeat: 3
-  maxsequence: 3    # Level 2
-  dictcheck: 1
-
-bozkarcis_lock_out_after_n_attempts: 5
-bozkarcis_fail_lock_unlock_time: 900   # Level 2: 15 minutes
-
-# sudo settings (Level 2)
-bozkarcis_sudo_log: true
-bozkarcis_sudo_logfile: "/var/log/sudo.log"
-bozkarcis_sudo_reauthentication: true   # Level 2: timestamp_timeout
-bozkarcis_sudo_timestamp_timeout: 0     # Level 2: re-auth every time
-
-# SSH hardening
-bozkarcis_sshd:
-  ClientAliveInterval: 300
-  ClientAliveCountMax: 3         # Level 2
-  LoginGraceTime: 60
-  MaxAuthTries: 4
-  MaxSessions: 10
-  PermitRootLogin: "no"
-  PermitEmptyPasswords: "no"
-  PermitUserEnvironment: "no"
-  UsePAM: "yes"
-  IgnoreRhosts: "yes"
-  HostbasedAuthentication: "no"
-  X11Forwarding: "no"            # Level 2
-  AllowTcpForwarding: "no"       # Level 2
-  Banner: "/etc/issue.net"
-  Protocol: 2
-  Ciphers: "aes256-ctr,aes192-ctr,aes128-ctr"
-  MACs: "hmac-sha2-512-etm@openssh.com,hmac-sha2-256-etm@openssh.com"
-  KexAlgorithms: "ecdh-sha2-nistp521,ecdh-sha2-nistp384,ecdh-sha2-nistp256"
-  LogLevel: VERBOSE              # Level 2
-
-# --- Section 6: System Maintenance ---
-bozkarcis_passwd_perms: true
-bozkarcis_shadow_perms: true
-bozkarcis_group_perms: true
-VARS
-
-# Create the Ansible playbook
-cat > /tmp/run_cis_level2.yml << 'PLAY'
----
-- name: "Bozkaros Linux 1 - CIS Level 2 Server Hardening"
-  hosts: local
-  become: true
-  gather_facts: true
-  vars_files:
-    - /tmp/cis_vars/level2_overrides.yml
-  roles:
-    - role: siperal.cis_rhel10
-  tags:
-    - level1_server
-    - level2_server
-PLAY
-
-echo "[CIS] Running siperal/bozkarcis with Level 2 tags..."
-ansible-playbook -i /tmp/cis_inventory.ini /tmp/run_cis_level2.yml --tags "level1_server,level2_server" --skip-tags "mount_option" -v 2>&1 | tee /root/ansible-cis-level2.log
-
-echo "[CIS] Ansible hardening run complete. Check /root/ansible-cis-level2.log"
+    echo "[CIS] Ansible delta run complete."
+    rm -f /etc/ansible/cis_inventory.ini /etc/ansible/cis_vars_delta.yml /etc/ansible/run_cis_delta.yml
+else
+    echo "[CIS] bozkarcis role not found — OSCAP-only hardening applied."
+fi
 
 # -----------------------------------------------------------------------------
 # 8. AIDE Initialization (CIS 6.3.x: File integrity baseline)
 # Must be done AFTER all hardening is applied
 # -----------------------------------------------------------------------------
 echo "[CIS] Initializing AIDE database (file integrity baseline)..."
-aide --init
-mv /var/lib/aide/aide.db.new.gz /var/lib/aide/aide.db.gz
+aide --init && mv /var/lib/aide/aide.db.new.gz /var/lib/aide/aide.db.gz
+chmod 750 /etc/cron.daily/aide-check
 echo "[CIS] AIDE database initialized."
 
 # -----------------------------------------------------------------------------
 # 9. CLEANUP
 # -----------------------------------------------------------------------------
-echo "[CIS] Cleaning up temporary files..."
-rm -f /tmp/cis_inventory.ini
-rm -rf /tmp/cis_vars
-rm -f /tmp/run_cis_level2.yml
-# Retain logs for audit trail
+echo "[CIS] All post-install hardening complete. Review /root/ks-post-cis.log"
+echo "[CIS] Cleaning up..."
 echo "[CIS] Post-install hardening complete."
-echo "[CIS] Review /root/ks-post-cis.log and /root/ansible-cis-level2.log"
-
-# Schedule first-boot AIDE check
-cat > /etc/cron.daily/aide-check << 'AIDE'
-#!/bin/bash
-/usr/sbin/aide --check 2>&1 | mail -s "AIDE Integrity Report - $(hostname)" root
-AIDE
-chmod 750 /etc/cron.daily/aide-check
-
 %end

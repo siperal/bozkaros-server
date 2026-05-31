@@ -14,7 +14,7 @@ RBRANDED_ISO="_rocky-to-bozkaros.iso"
 BOZKAROS_ISO="Siperal-Bozkaros-Server-1.0-x86_64.iso"
 ORIGINAL_VOLID="Rocky-10-1-x86_64-dvd"
 ORIGINAL_VOLID_MINI="Rocky-10-1-x86_64-minimal"
-BOZKAROT_VOLID="SIPERAL_BOZKAROS_SERVER_1_0_X86_64"
+BOZKAROS_VOLID="BOZKAROS_SERVER_1_0_X86_64"
 WORKDIR="$(pwd)/build"
 WORKMNT="/mnt/bozkaros-iso"
 WORKISO="$(pwd)/mnt"
@@ -80,8 +80,8 @@ for cfg in \
   ; do
   if [[ -f "$cfg" ]]; then
     sudo sed -i \
-        -e "s/$ORIGINAL_VOLID/$BOZKAROT_VOLID/g" \
-        -e "s/$ORIGINAL_VOLID_MINI/$BOZKAROT_VOLID/g" \
+        -e "s/$ORIGINAL_VOLID/$BOZKAROS_VOLID/g" \
+        -e "s/$ORIGINAL_VOLID_MINI/$BOZKAROS_VOLID/g" \
         -e 's/Rocky Linux 10.1/Siperal Bozkaros Server/g' \
         -e 's/Rocky Linux/Siperal Bozkaros Server/g' \
         "$cfg"
@@ -155,7 +155,7 @@ if [[ ! -f $WORKDIR/$RBRANDED_ISO ]]; then
     -e images/efiboot.img \
         -no-emul-boot \
     --protective-msdos-label \
-    -V "$BOZKAROT_VOLID" \
+    -V "$BOZKAROS_VOLID" \
     -o "$WORKDIR/$RBRANDED_ISO" \
     "$WORKISO"
 fi
@@ -199,30 +199,49 @@ rpmbuild -bb ./rpmbuild/SPECS/bozkaros-logos.spec
 # ACCESS
 # -----------------------------------------------------------------------------
 
+# Creating temporary environment
+\cp .env "$WORKDIR/.env"
+
 echo "Creating access keys..."
 
 . ./var/auth.sh
+
 if [[ -z $BOZKAROS_PASS ]]; then
-    echo "error: empty security admin password";
-    exit 1;
+    echo "error: empty security admin password"
+    exit 1
 fi
 
 # Cleanup
 rm -f "$WORKDIR/id_bozkaros" "$WORKDIR/id_bozkaros.pub"
 
-# Hashes
-BOZKAROS_HASH=${BOZKAROS_HASH//&/\\&}
-
 # SSH keys
 ssh-keygen -t ed25519 \
-    -C "user@bozkaros" \
+    -C "bozkaros@bozkaros" \
     -f "$WORKDIR/id_bozkaros" \
     -N "$BOZKAROS_PASS"
 
 # Public keys
 BOZKAROS_PUBLIC_KEY=$(tr -d '\n' < "$WORKDIR/id_bozkaros.pub" | sed 's/[\\&|]/\\&/g')
+echo $BOZKAROS_PUBLIC_KEY
+sudo sed -i -e "s|^BOZKAROS_PUBLIC_KEY=.*|BOZKAROS_PUBLIC_KEY='${BOZKAROS_PUBLIC_KEY}'|" "${WORKDIR}/.env"
 
 echo "Access keys ready"
+
+
+# -----------------------------------------------------------------------------
+# ANSIBLE RULES
+# -----------------------------------------------------------------------------
+
+# Compress CIS repo
+if [[ ! -f ./cis/bozkarcis.tar.gz ]]; then
+    mkdir -p ./cis
+    tar -czf "./cis/bozkarcis.tar.gz" bozkarcis
+fi
+
+# Collections
+if [[ ! -d ./collections ]]; then
+    ansible-galaxy collection install community.general -p ./collections --upgrade
+fi
 
 
 # -----------------------------------------------------------------------------
@@ -235,9 +254,12 @@ cp ./rpmbuild/RPMS/noarch/bozkaros-release-*.rpm ./rpms/
 cp ./rpmbuild/RPMS/noarch/bozkaros-logos-*.rpm   ./rpms/
 
 # Pool RPMs
+createrepo_c ./repo/server
 createrepo_c ./rpms/
 createrepo_c ./branding/
 createrepo_c ./conf/
+createrepo_c ./cis/
+createrepo_c ./collections
 
 
 # -----------------------------------------------------------------------------
@@ -246,15 +268,18 @@ createrepo_c ./conf/
 
 echo "Preparing Kickstart file..."
 
+set -a
 . ./var/locale.sh
 . ./var/network.sh
-
 echo "Exchange secret values..."
 KS_FILE="$WORKDIR/bozkaros-server.ks"
-. .env
-VARS='${LOCALE}${KEYMAP}${TIMEZONE}${NETWORK}${IP}${GATEWAY}${DEVICE}${HOSTNAME}${GRUB2_HASH}${BOZKAROS_HASH}${BOZKAROS_PUBLIC_KEY}'
-export $(grep -v '^#' .env | xargs)
-envsubst "$VARS" < "cis.ks" > "$KS_FILE"
+. "${WORKDIR}/.env"
+echo "Environment variables are loaded."
+set +a
+
+VARS='${LOCALE}${KEYMAP}${TIMEZONE}${NETWORK}${IP}${GATEWAY}${DEVICE}${HOSTNAME}${DISK}${GRUB2_HASH}${BOZKAROS_HASH}${BOZKAROS_PUBLIC_KEY}'
+#export $(grep -v '^#' "$WORKDIR/.env" | xargs)
+envsubst "$VARS" < "cis-level2.ks" > "$KS_FILE"
 
 echo "Validating KS file..."
 ksvalidator -v RHEL10 "$KS_FILE"
@@ -265,12 +290,15 @@ ksvalidator -v RHEL10 "$KS_FILE"
 #   --ks    : embed kickstart into ISO and wire inst.ks automatically
 echo "Building new ISO..."
 rm -f "$WORKDIR/$BOZKAROS_ISO"
-mkksiso \
+sudo mkksiso \
   --ks "$KS_FILE" \
+  --add ./repo/server \
   --add ./rpms \
   --add ./branding \
   --add ./conf \
-  -V "$BOZKAROT_VOLID" \
+  --add ./cis \
+  --add ./collections \
+  -V "$BOZKAROS_VOLID" \
   "$WORKDIR/$RBRANDED_ISO" \
   "$WORKDIR/$BOZKAROS_ISO"
 # -c "inst.cmdline inst.noninteractive nompath rd.multipath=0 rd.luks=0 rd.md=0 inst.wait_for_disks=0" \

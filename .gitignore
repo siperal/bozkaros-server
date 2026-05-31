@@ -1,5 +1,6 @@
 bin
 build
+cis
 img
 iso
 mnt
@@ -10,3 +11,4 @@ branding/repodata
 conf/repodata
 rpms
 rpmbuild
+collections

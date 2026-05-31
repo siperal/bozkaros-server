@@ -1,0 +1,13 @@
+- name: "Bozkaros - CIS Level 2 Delta Hardening (post-OSCAP)"
+  hosts: local
+  become: true
+  gather_facts: true
+  vars:
+    ansible_remote_tmp: /root/.ansible/tmp
+  vars_files:
+    - /etc/ansible/cis_vars_delta.yml
+  roles:
+    - role: bozkarcis
+  tags:
+    - level1_server
+    - level2_server
