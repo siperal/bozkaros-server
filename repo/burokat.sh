@@ -3,9 +3,6 @@
 # Install podman on your Rocky build VM if not already present
 sudo dnf install -y podman
 
-# Pull a minimal Rocky 10 image
-podman pull rockylinux:10-minimal
-
 # Run the download inside the clean container
 # Nothing is pre-installed, so --resolve catches ALL real dependencies
 podman run --rm \

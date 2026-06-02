@@ -12,4 +12,3 @@ A few practical points for selling to enterprises:
 - TODO replace RHEL with Rocky, too
 - https://bozkaros.siperal.com/issues goes to Github issues
 - anaconda for rocky linux appears in the installation
-- ./bozkarcis/templates/ansible_vars_goss.yml.j2 still old after bozkarcis updated - how to refresh? so the ansible playbook continue running

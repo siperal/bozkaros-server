@@ -49,6 +49,10 @@ if [ ! -f "${ORIGINAL_ISO}" ]; then
     exit 1
 fi
 
+if [[ ! -f ./bin/goss-linux-amd64 ]]; then
+    echo "Downloading GOSS binary for linux amd64..."
+    curl --output ./bin/goss-linux-amd64 "https://github.com/goss-org/goss/releases/download/v0.4.9/goss-linux-amd64"
+fi
 
 mkdir -p "${WORKDIR}" "${WORKISO}"
 sudo mkdir -p "${WORKMNT}"
@@ -278,7 +282,7 @@ KS_FILE="$WORKDIR/bozkaros-server.ks"
 echo "Environment variables are loaded."
 set +a
 
-VARS='${LOCALE}${KEYMAP}${TIMEZONE}${NETWORK}${IP}${GATEWAY}${DEVICE}${HOSTNAME}${DISK}${GRUB2_HASH}${BOZKAROS_HASH}${BOZKAROS_PUBLIC_KEY}'
+VARS='${LOCALE}${KEYMAP}${TIMEZONE}${NETWORK}${IP}${GATEWAY}${DEVICE}${HOSTNAME}${DISK}${GRUB2_PASS}${GRUB2_HASH}${BOZKAROS_PASS}${BOZKAROS_HASH}${BOZKAROS_PUBLIC_KEY}'
 #export $(grep -v '^#' "$WORKDIR/.env" | xargs)
 envsubst "$VARS" < "cis-level2.ks" > "$KS_FILE"
 

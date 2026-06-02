@@ -1,10 +1,10 @@
 #version=RHEL10
 # =============================================================================
-# Bozkaros Server unattended minimal install (Rocky 10 derivative)
+# Siperal Bozkaros Server unattended minimal install (Rocky 10 derivative)
 # Bozkaros — CIS Server Level 2 Kickstart
 # Based on: siperal/bozkarcis
-# Target:   CIS Level 2 Server
-# Author:   Murat AYDIN <a@siperal.com>
+# Target:   CIS Level 2 RHEL10 Server
+# Author:   Siperal Limited - www.siperal.com, Murat AYDIN <a@siperal.com>
 # Date:     2026-07-13
 # =============================================================================
 
@@ -22,7 +22,7 @@ eula --agreed
 # -----------------------------------------------------------------------------
 # REPOS
 # -----------------------------------------------------------------------------
-repo --name=baseos --baseurl=file:///run/install/repo/server --install
+repo --name=server --baseurl=file:///run/install/repo/server/ --install
 repo --name=rpms --baseurl=file:///run/install/repo/rpms/ --install
 repo --name=branding --baseurl=file:///run/install/repo/branding/ --install
 repo --name=conf --baseurl=file:///run/install/repo/conf/ --install
@@ -147,7 +147,6 @@ firewall --enabled --ssh
 rootpw --lock
 
 # Create an admin user
-# Generate hash: python3 -c "import crypt; print(crypt.crypt('YourPass', crypt.mksalt(crypt.METHOD_SHA512)))"
 # Password hash is generated in ./auth.sh
 user --name=bozkaros --groups=wheel --iscrypted --password=${BOZKAROS_HASH} --gecos="Security Admin"
 sshkey --username=bozkaros  "${BOZKAROS_PUBLIC_KEY}"
@@ -186,7 +185,6 @@ ansible-core
 git
 openssh
 python3
-python3-pip
 tar
 
 # Required by OSCAP Anaconda Add-on
@@ -211,6 +209,7 @@ policycoreutils
 policycoreutils-python-utils
 
 # PAM and authentication
+acl
 pam
 libpwquality
 authselect
@@ -268,7 +267,6 @@ dracut-config-generic
 # PRE-INSTALL SCRIPT
 # -----------------------------------------------------------------------------
 %pre
-#!/bin/bash
 echo "Starting CIS Level 2 Pre-Install configuration..."
 %end
 
@@ -312,11 +310,9 @@ echo "[CIS] Configuring chrony NTP..."
 echo "Copying Ansible rules..."
 mkdir -p ${SYSROOT}/etc/ansible/roles/
 tar -xzf ${CIS}/bozkarcis.tar.gz -C ${SYSROOT}/etc/ansible/roles/
-mv ${SYSROOT}/etc/ansible/roles/audit ${SYSROOT}/opt
+mv ${SYSROOT}/etc/ansible/roles/bozkarcis/audit ${SYSROOT}/opt/bozkarcis-audit
 \cp ${CONF}/ansible.cfg ${SYSROOT}/etc/ansible/ansible.cfg
 \cp ${CONF}/cis_inventory.ini ${SYSROOT}/etc/ansible/cis_inventory.ini
-\cp ${CONF}/cis_vars_delta.yml ${SYSROOT}/etc/ansible/cis_vars_delta.yml
-\cp ${CONF}/run_cis_delta.yml ${SYSROOT}/etc/ansible/run_cis_delta.yml
 \cp -r ${COLLECTIONS}/. ${SYSROOT}/etc/ansible/collections
 
 # -----------------------------------------------------------------------------
@@ -360,12 +356,6 @@ echo "============================================================"
 
 export LC_ALL=C.UTF-8
 export LANG=C.UTF-8
-
-# -----------------------------------------------------------------------------
-# 0. INSTALL ANSIBLE
-#python3 -m pip install --user pipx
-#python3 -m pipx ensurepath
-#pipx install ansible-core
 
 # -----------------------------------------------------------------------------
 # 1. FIPS MODE (CIS 1.3.x / Level 2 requirement)
@@ -431,7 +421,7 @@ chmod 640 /etc/chrony.conf
 
 # -----------------------------------------------------------------------------
 # 7. CIS HARDENING
-# ANSIBLE DELTA RUN — controls in RHEL10-CIS role beyond scap-security-guide
+# ANSIBLE RUN — controls in RHEL10-CIS role beyond scap-security-guide
 # Runs in the installed system chroot using the locally cloned role.
 # Since OSCAP already applied the base profile, this targets only the delta:
 #   - usb-storage disable (Level 2 specific)
@@ -441,17 +431,9 @@ chmod 640 /etc/chrony.conf
 #   - firewalld default-zone drop
 # -----------------------------------------------------------------------------
 
-ANSIBLE_ROLES="/etc/ansible/roles/bozkarcis"
-if [ -d "${ANSIBLE_ROLES}/tasks" ]; then
-    echo "[CIS] Running Bozkarcis Ansible delta for Level 2 controls..."
-
-    ansible-playbook -i /etc/ansible/cis_inventory.ini /etc/ansible/run_cis_delta.yml --tags "level1_server,level2_server" --skip-tags "mount_option,tmp_mount,vartmp_mount,rule_1.1.2.1,rule_1.1.3.1,rule_1.1.4.1,rule_1.1.5.1,rule_1.1.6.1,rule_1.1.7.1" -v 2>&1 | tee /root/ansible-cis-delta.log
-
-    echo "[CIS] Ansible delta run complete."
-    rm -f /etc/ansible/cis_inventory.ini /etc/ansible/cis_vars_delta.yml /etc/ansible/run_cis_delta.yml
-else
-    echo "[CIS] bozkarcis role not found — OSCAP-only hardening applied."
-fi
+echo "[CIS] Running Bozkarcis Ansible delta for Level 2 controls..."
+chmod +x /usr/local/bin/goss
+ansible-playbook -i /etc/ansible/cis_inventory.ini /etc/ansible/roles/bozkarcis/site.yml --tags "level1_server,level2_server" --skip-tags "mount_option,tmp_mount,vartmp_mount,rule_1.1.2.1,rule_1.1.3.1,rule_1.1.4.1,rule_1.1.5.1,rule_1.1.6.1,rule_1.1.7.1" -v 2>&1 | tee /root/ansible-cis.log
 
 # -----------------------------------------------------------------------------
 # 8. AIDE Initialization (CIS 6.3.x: File integrity baseline)
@@ -468,4 +450,5 @@ echo "[CIS] AIDE database initialized."
 echo "[CIS] All post-install hardening complete. Review /root/ks-post-cis.log"
 echo "[CIS] Cleaning up..."
 echo "[CIS] Post-install hardening complete."
+rm -f /root/*
 %end
