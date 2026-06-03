@@ -1,14 +1,11 @@
-bin
 build
 cis
 img
 iso
 mnt
 
-repo/server
-repo/burokat
+pkgs
 branding/repodata
 conf/repodata
 rpms
 rpmbuild
-collections

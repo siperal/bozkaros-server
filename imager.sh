@@ -49,9 +49,10 @@ if [ ! -f "${ORIGINAL_ISO}" ]; then
     exit 1
 fi
 
-if [[ ! -f ./bin/goss-linux-amd64 ]]; then
+if [[ ! -f ./cis/goss-linux-amd64 ]]; then
     echo "Downloading GOSS binary for linux amd64..."
-    curl --output ./bin/goss-linux-amd64 "https://github.com/goss-org/goss/releases/download/v0.4.9/goss-linux-amd64"
+    mkdir -p ./cis
+    curl --output ./cis/goss-linux-amd64 "https://github.com/goss-org/goss/releases/download/v0.4.9/goss-linux-amd64"
 fi
 
 mkdir -p "${WORKDIR}" "${WORKISO}"
@@ -226,7 +227,6 @@ ssh-keygen -t ed25519 \
 
 # Public keys
 BOZKAROS_PUBLIC_KEY=$(tr -d '\n' < "$WORKDIR/id_bozkaros.pub" | sed 's/[\\&|]/\\&/g')
-echo $BOZKAROS_PUBLIC_KEY
 sudo sed -i -e "s|^BOZKAROS_PUBLIC_KEY=.*|BOZKAROS_PUBLIC_KEY='${BOZKAROS_PUBLIC_KEY}'|" "${WORKDIR}/.env"
 
 echo "Access keys ready"
@@ -243,8 +243,9 @@ if [[ ! -f ./cis/bozkarcis.tar.gz ]]; then
 fi
 
 # Collections
-if [[ ! -d ./collections ]]; then
-    ansible-galaxy collection install community.general -p ./collections --upgrade
+if [[ ! -f ./cis/collections/community-general-9.5.11.tar.gz ]]; then
+    ansible-galaxy collection download community.general:9.5.11 community.crypto:2.26.1 ansible.posix:1.6.2
+    mv ./collections/ ./cis/
 fi
 
 
@@ -253,19 +254,14 @@ fi
 # -----------------------------------------------------------------------------
 
 echo "Transfer RPMs..."
-mkdir -p ./rpms
-cp ./rpmbuild/RPMS/noarch/bozkaros-release-*.rpm ./rpms/
-cp ./rpmbuild/RPMS/noarch/bozkaros-logos-*.rpm   ./rpms/
+cp ./rpmbuild/RPMS/noarch/bozkaros-release-*.rpm ./pkgs/
+cp ./rpmbuild/RPMS/noarch/bozkaros-logos-*.rpm   ./pkgs/
 
 # Pool RPMs
-createrepo_c ./repo/server
-createrepo_c ./rpms/
+createrepo_c ./pkgs/
 createrepo_c ./branding/
 createrepo_c ./conf/
 createrepo_c ./cis/
-createrepo_c ./collections
-createrepo_c ./bin
-
 
 # -----------------------------------------------------------------------------
 # KICKSTART
@@ -297,16 +293,12 @@ echo "Building new ISO..."
 rm -f "$WORKDIR/$BOZKAROS_ISO"
 sudo mkksiso \
   --ks "$KS_FILE" \
-  --add ./repo/server \
-  --add ./rpms \
+  --add ./pkgs \
   --add ./branding \
   --add ./conf \
   --add ./cis \
-  --add ./collections \
-  --add ./bin \
   -V "$BOZKAROS_VOLID" \
   "$WORKDIR/$RBRANDED_ISO" \
   "$WORKDIR/$BOZKAROS_ISO"
-# -c "inst.cmdline inst.noninteractive nompath rd.multipath=0 rd.luks=0 rd.md=0 inst.wait_for_disks=0" \
 
 echo "Bozkaros ISO created: ./build/$BOZKAROS_ISO"

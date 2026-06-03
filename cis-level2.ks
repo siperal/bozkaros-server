@@ -22,13 +22,10 @@ eula --agreed
 # -----------------------------------------------------------------------------
 # REPOS
 # -----------------------------------------------------------------------------
-repo --name=server --baseurl=file:///run/install/repo/server/ --install
-repo --name=rpms --baseurl=file:///run/install/repo/rpms/ --install
+repo --name=pkgs --baseurl=file:///run/install/repo/pkgs/ --install
 repo --name=branding --baseurl=file:///run/install/repo/branding/ --install
 repo --name=conf --baseurl=file:///run/install/repo/conf/ --install
 repo --name=cis --baseurl=file:///run/install/repo/cis/ --install
-repo --name=collections --baseurl=file:///run/install/repo/collections/ --install
-repo --name=bin --baseurl=file:///run/install/repo/bin/ --install
 
 # -----------------------------------------------------------------------------
 # LANGUAGE, KEYBOARD, TIMEZONE
@@ -44,18 +41,6 @@ timezone ${TIMEZONE} --utc
 # Adjust interface name and IP for your environment
 # -----------------------------------------------------------------------------
 network --bootproto=${NETWORK} --ip=${IP} --netmask=255.255.255.0 --gateway=${GATEWAY} --nameserver=${GATEWAY} --hostname=${HOSTNAME} --device=${DEVICE} --activate --noipv6
-
-# -----------------------------------------------------------------------------
-# OSCAP ANACONDA ADD-ON
-# Runs the CIS Level 2 Server profile natively inside Anaconda during install.
-# This is NOT a post-install step — it runs in the installer environment with
-# full knowledge of the partition layout, before the first boot.
-# Handles: kernel params, services, sysctl, PAM, SSH, audit rules, etc.
-# -----------------------------------------------------------------------------
-%addon com_redhat_oscap
-    content-type = scap-security-guide
-    profile      = xccdf_org.ssgproject.content_profile_cis_server_l2
-%end
 
 # -----------------------------------------------------------------------------
 # BOOTLOADER
@@ -143,6 +128,10 @@ firewall --enabled --ssh
 # AUTHENTICATION
 # CIS 5.x: Lock root, configure shadow passwords
 # -----------------------------------------------------------------------------
+
+# CIS requires strong password policies; PAM/Authselect tuned in Ansible post
+authselect --enableshadow --passalgo=sha512
+
 # Lock root account (access via sudo only)
 rootpw --lock
 
@@ -158,7 +147,7 @@ group --name=sshallowed --gid=1500
 # -----------------------------------------------------------------------------
 # SERVICES
 # -----------------------------------------------------------------------------
-services --enabled=sshd,chronyd
+services --enabled=sshd,auditd,chronyd,firewalld,rsyslog,fail2ban
 
 
 # =============================================================================
@@ -181,53 +170,47 @@ bozkaros-release
 bozkaros-logos
 
 # Base packages
-ansible-core
-git
 openssh
+openssl
 python3
 tar
 
-# Required by OSCAP Anaconda Add-on
+# SCAP / Hardening
+ansible-core
+git
 openscap-scanner
 scap-security-guide
 
-# CIS 4.x: Auditing and logging
+# Security & Audit
+acl
+aide
 audit
 audit-libs
-rsyslog
-
-# CIS 3.x: Networking tools
-firewalld
-nftables
-
-# CIS 1.x: Crypto and integrity
-aide
-openssl
-libselinux
-libselinux-utils
-policycoreutils
-policycoreutils-python-utils
-
-# PAM and authentication
-acl
-pam
-libpwquality
+audit-rules
 authselect
-sssd-common
-
-# Time synchronization (CIS 2.1.1)
 chrony
-
-# Process accounting (CIS 4.1.x)
-psacct
-
-# Required for crypto-policy enforcement (CIS 1.7.x)
+cronie
 crypto-policies
 crypto-policies-scripts
+fail2ban
+firewalld
+libpwquality
+libselinux
+libselinux-utils
+nftables
+pam
+policycoreutils
+policycoreutils-python-utils
+psacct
+rsyslog
+sssd-common
+sudo
 
 # FIPS-related
 dracut
+dracut-fips
 dracut-config-generic
+
 
 # Explicitly remove - CIS 2.2.x / 2.3.x
 -avahi
@@ -266,8 +249,13 @@ dracut-config-generic
 # -----------------------------------------------------------------------------
 # PRE-INSTALL SCRIPT
 # -----------------------------------------------------------------------------
-%pre
-echo "Starting CIS Level 2 Pre-Install configuration..."
+%pre --log=/tmp/ks-pre.log
+#!/bin/bash
+# Verify FIPS boot flag is present before proceeding
+if ! cat /proc/cmdline | grep -q "fips=1"; then
+    echo "WARNING: fips=1 not detected on kernel command line." >&2
+    echo "For RHEL 10 / RL 10, FIPS mode MUST be enabled at install time." >&2
+fi
 %end
 
 
@@ -280,54 +268,46 @@ echo "Starting CIS Level 2 Pre-Install configuration..."
 # -----------------------------------------------------------------------------
 %post --nochroot --log=/root/ks-post-nochroot.log
 #!/bin/bash
-set -euo pipefail
-
 SYSROOT=/mnt/sysimage
 BRANDING=/run/install/repo/branding
 CONF=/run/install/repo/conf
 CIS=/run/install/repo/cis
-COLLECTIONS=/run/install/repo/collections
-BIN=/run/install/repo/bin
 
 # -----------------------------------------------------------------------------
-# 1. BANNER / MOTD (CIS 1.7.x: Warning banners)
+# BANNER / MOTD (CIS 1.7.x: Warning banners)
 # -----------------------------------------------------------------------------
-echo "[CIS] Configuring login banners..."
-\cp ${BRANDING}/motd ${SYSROOT}/etc/motd
-\cp ${BRANDING}/issue ${SYSROOT}/etc/issue
-\cp ${BRANDING}/issue ${SYSROOT}/etc/issue.net
-\cp ${BRANDING}/lsb-release ${SYSROOT}/etc/lsb-release
+echo "[BRANDING] Configuring login banners..."
+cp ${BRANDING}/motd ${SYSROOT}/etc/motd
+cp ${BRANDING}/issue ${SYSROOT}/etc/issue
+cp ${BRANDING}/issue ${SYSROOT}/etc/issue.net
+cp ${BRANDING}/lsb-release ${SYSROOT}/etc/lsb-release
 
 # -----------------------------------------------------------------------------
-# 2. CHRONY / NTP (CIS 2.1.1)
+# CHRONY / NTP (CIS 2.1.1)
 # -----------------------------------------------------------------------------
-echo "[CIS] Configuring chrony NTP..."
-\cp ${CONF}/chrony.conf ${SYSROOT}/etc/chrony.conf
+echo "[CHRONY] Configuring chrony NTP..."
+cp ${CONF}/chrony.conf ${SYSROOT}/etc/chrony.conf
 
 # -----------------------------------------------------------------------------
-# 3. ANSIBLE
+# ANSIBLE
 # -----------------------------------------------------------------------------
-echo "Copying Ansible rules..."
+echo "[HARDEN] Copying Ansible rules..."
 mkdir -p ${SYSROOT}/etc/ansible/roles/
-tar -xzf ${CIS}/bozkarcis.tar.gz -C ${SYSROOT}/etc/ansible/roles/
+cp -a ${CIS} ${SYSROOT}/etc/ansible/
+tar -xzf ${SYSROOT}/etc/ansible/cis/bozkarcis.tar.gz -C ${SYSROOT}/etc/ansible/roles/ && rm ${SYSROOT}/etc/ansible/cis/bozkarcis.tar.gz
+mv ${SYSROOT}/etc/ansible/cis/goss-linux-amd64 ${SYSROOT}/usr/local/bin/goss
 mv ${SYSROOT}/etc/ansible/roles/bozkarcis/audit ${SYSROOT}/opt/bozkarcis-audit
-\cp ${CONF}/ansible.cfg ${SYSROOT}/etc/ansible/ansible.cfg
-\cp ${CONF}/cis_inventory.ini ${SYSROOT}/etc/ansible/cis_inventory.ini
-\cp -r ${COLLECTIONS}/. ${SYSROOT}/etc/ansible/collections
+cp ${CONF}/ansible.cfg ${SYSROOT}/etc/ansible/ansible.cfg
+cp ${CONF}/cis_inventory.ini ${SYSROOT}/etc/ansible/cis_inventory.ini
 
 # -----------------------------------------------------------------------------
-# 4. AIDE
+# AIDE
 # -----------------------------------------------------------------------------
-echo "AIDE daily check..."
-\cp ${CONF}/aide-check ${SYSROOT}/etc/cron.daily/aide-check
-
-# -----------------------------------------------------------------------------
-# 5. BINARIES
-# -----------------------------------------------------------------------------
-echo "Copying binaries..."
-\cp ${BIN}/goss-linux-amd64 ${SYSROOT}/usr/local/bin/goss
+echo "[HARDEN] AIDE daily check..."
+cp ${CONF}/aide-check ${SYSROOT}/etc/cron.daily/aide-check
 
 %end
+
 
 # =============================================================================
 # =============================================================================
@@ -335,120 +315,115 @@ echo "Copying binaries..."
 
 # =============================================================================
 # POST-INSTALL SCRIPT (chroot=no for network access)
-# Runs the siperal/bozkarcis role for Level 2 hardening
-# The OSCAP addon already applied CIS Level 2 during install.
-# This %post handles ONLY the controls that scap-security-guide does NOT cover:
-#   - FIPS mode enablement (requires initramfs rebuild)
-#   - /dev/shm fstab hardening
-#   - Login banners
-#   - Chrony config
-#   - GRUB config file permissions
-#   - Ansible delta run for siperal/bozkarcis controls beyond SSG
-#   - AIDE database initialization
 # =============================================================================
-%post --log=/root/ks-post-cis.log
+%post --interpreter=/bin/bash
 #!/bin/bash
-set -euo pipefail
-
-echo "============================================================"
-echo "  Siperal Bozkaros - CIS Level 2 Post-Install Hardening"
-echo "============================================================"
+#set -euo pipefail
+exec < /dev/tty3 > /dev/tty3 2>&1
+chvt 3
+exec > >(tee -a /root/ks-post-chroot.log) 2>&1
 
 export LC_ALL=C.UTF-8
 export LANG=C.UTF-8
+export ANSIBLE_STDOUT_CALLBACK=yaml
+export ANSIBLE_FORCE_COLOR=0        # disable ANSI colors in installer TTY
+export PYTHONUNBUFFERED=1           # prevent Python output buffering
 
 # -----------------------------------------------------------------------------
-# 1. FIPS MODE (CIS 1.3.x / Level 2 requirement)
-# FIPS Step 1: Get UUID of /boot partition (required alongside fips=1)
-# FIPS Step 2: Add fips=1 + boot=UUID to all installed kernels
+# FIPS MODE (CIS 1.3.x / Level 2 requirement)
 # -----------------------------------------------------------------------------
-echo "[CIS] Enabling FIPS mode (Rocky 10 method: fips=1 kernel parameter)..."
 
+# Boot UUID
 BOOT_UUID=$(findmnt /boot -no UUID)
 if [ -z "${BOOT_UUID}" ]; then
     echo "WARN: Could not determine /boot UUID — FIPS kernel arg may be incomplete"
 else
-    echo "[CIS] /boot UUID: ${BOOT_UUID}"
+    echo "[HARDEN] /boot UUID: ${BOOT_UUID}"
 fi
-
 grubby --update-kernel=ALL --args="fips=1 boot=UUID=${BOOT_UUID}"
-
-# -----------------------------------------------------------------------------
-# 2. CRYPTO POLICY (CIS 1.7.x: FIPS or FUTURE policy for Level 2)
-# FIPS Step 3: Set crypto policy to FIPS
-# FIPS Step 4: Touch /etc/system-fips (signals userspace FIPS state)
-# FIPS Step 5: Rebuild initramfs with FIPS support
-# -----------------------------------------------------------------------------
-echo "[CIS] Setting system-wide crypto policy to FIPS..."
-update-crypto-policies --set FIPS
-
 touch /etc/system-fips
-
-# dracut in Rocky 10 has the FIPS module built-in — no extra package needed
 dracut --force --kver "$(ls /lib/modules | tail -1)"
 
-echo "[CIS] FIPS mode configured. Verify after reboot: cat /proc/sys/crypto/fips_enabled"
+# Harden crypto policy
+echo "[HARDEN] Updating crypto policies"
+update-crypto-policies --set FUTURE
 
 # -----------------------------------------------------------------------------
-# 3. /dev/shm hardening (CIS 1.1.8.x)
-# Ansible role handles /etc/fstab but this ensures it at install time
-# -----------------------------------------------------------------------------
-echo "[CIS] Hardening /dev/shm in /etc/fstab..."
-grep -q "/dev/shm" /etc/fstab || echo "tmpfs /dev/shm tmpfs defaults,nodev,nosuid,noexec 0 0" >> /etc/fstab
-
-# -----------------------------------------------------------------------------
-# 4. GRUB config permissions (CIS 1.4.1)
-# -----------------------------------------------------------------------------
-echo "[CIS] Setting GRUB config permissions..."
-[ -f /boot/grub2/grub.cfg ]      && chmod og-rwx /boot/grub2/grub.cfg
-[ -f /boot/grub2/grubenv ]       && chmod og-rwx /boot/grub2/grubenv
-[ -f /boot/efi/EFI/bozkaros/grub.cfg ] && chmod og-rwx /boot/efi/EFI/bozkaros/grub.cfg
-
-# -----------------------------------------------------------------------------
-# 5. BANNER / MOTD (CIS 1.7.x: Warning banners)
+# BANNER / MOTD (CIS 1.7.x: Warning banners)
 # -----------------------------------------------------------------------------
 # Already copied in nochroot
+echo "[HARDEN] Banner permissions"
 chown root:root /etc/issue /etc/issue.net /etc/motd
 chmod 644 /etc/issue /etc/issue.net /etc/motd
 
 # -----------------------------------------------------------------------------
-# 6. CHRONY / NTP (CIS 2.1.1)
+# CHRONY / NTP (CIS 2.1.1)
 # -----------------------------------------------------------------------------
 # Already copied in nochroot
 # Use organization's NTP servers if possible
+echo "[HARDEN] Chrony permissions"
 chown root:root /etc/chrony.conf
 chmod 640 /etc/chrony.conf
 
 # -----------------------------------------------------------------------------
-# 7. CIS HARDENING
-# ANSIBLE RUN — controls in RHEL10-CIS role beyond scap-security-guide
-# Runs in the installed system chroot using the locally cloned role.
-# Since OSCAP already applied the base profile, this targets only the delta:
-#   - usb-storage disable (Level 2 specific)
-#   - sudo timestamp_timeout=0
-#   - SSH LogLevel VERBOSE, AllowTcpForwarding no
-#   - auditd disk_full/error actions
-#   - firewalld default-zone drop
+# SSH HOST KEYS
+# -----------------------------------------------------------------------------
+# Generate SSH host keys so sshd -t validation works during hardening
+echo "[HARDEN] Generating SSH host keys..."
+ssh-keygen -t rsa     -b 4096 -f /etc/ssh/ssh_host_rsa_key     -N "" -q
+ssh-keygen -t ecdsa   -b 521  -f /etc/ssh/ssh_host_ecdsa_key   -N "" -q
+ssh-keygen -t ed25519         -f /etc/ssh/ssh_host_ed25519_key  -N "" -q
+# Set correct permissions (CIS 5.1.x also audits these)
+chmod 600 /etc/ssh/ssh_host_*_key
+chmod 644 /etc/ssh/ssh_host_*_key.pub
+chown root:root /etc/ssh/ssh_host_*_key /etc/ssh/ssh_host_*_key.pub
+
+# -----------------------------------------------------------------------------
+# AUDIT
+# -----------------------------------------------------------------------------
+echo "[HARDEN] Pre-creating audit log file for CIS 6.3.4.x compliance..."
+AUDIT_LOG_DIR=$(awk -F= '/^\s*log_file\s*=/ {gsub(/ /,"",$2); print $2}' /etc/audit/auditd.conf | xargs dirname)
+mkdir -p "${AUDIT_LOG_DIR}"
+touch "${AUDIT_LOG_DIR}/audit.log"
+# Pre-set correct ownership and permissions (CIS 6.3.4.2/3/4)
+chmod 600 "${AUDIT_LOG_DIR}/audit.log"
+chown root:root "${AUDIT_LOG_DIR}/audit.log"
+chmod 700 "${AUDIT_LOG_DIR}"
+chown root:root "${AUDIT_LOG_DIR}"
+
+# -----------------------------------------------------------------------------
+# ANSIBLE SETUP
 # -----------------------------------------------------------------------------
 
-echo "[CIS] Running Bozkarcis Ansible delta for Level 2 controls..."
+# Collections
+echo "[HARDEN] Installing ansible collections"
+ansible-galaxy collection install -p /etc/ansible/collections --force /etc/ansible/cis/collections/community-general-9.5.11.tar.gz && rm /etc/ansible/cis/collections/community-general-9.5.11.tar.gz
+ansible-galaxy collection install -p /etc/ansible/collections --force /etc/ansible/cis/collections/community-crypto-2.26.1.tar.gz && rm /etc/ansible/cis/collections/community-crypto-2.26.1.tar.gz
+ansible-galaxy collection install -p /etc/ansible/collections --force /etc/ansible/cis/collections/ansible-posix-1.6.2.tar.gz && rm /etc/ansible/cis/collections/ansible-posix-1.6.2.tar.gz
+
+# Goss permissions
+echo "[HARDEN] Set Goss permission"
 chmod +x /usr/local/bin/goss
-ansible-playbook -i /etc/ansible/cis_inventory.ini /etc/ansible/roles/bozkarcis/site.yml --tags "level1_server,level2_server" --skip-tags "mount_option,tmp_mount,vartmp_mount,rule_1.1.2.1,rule_1.1.3.1,rule_1.1.4.1,rule_1.1.5.1,rule_1.1.6.1,rule_1.1.7.1" -v 2>&1 | tee /root/ansible-cis.log
+
+# Playbook
+echo "[HARDEN] Run ansible playbook"
+ansible-playbook -i /etc/ansible/cis_inventory.ini -e "@/etc/ansible/roles/bozkarcis/vars/bozkaros.yml" /etc/ansible/roles/bozkarcis/site.yml -v 2>&1 | tee -a /root/ansible.log
 
 # -----------------------------------------------------------------------------
-# 8. AIDE Initialization (CIS 6.3.x: File integrity baseline)
+# AIDE INIT
+# CIS 6.3.x: File integrity baseline
 # Must be done AFTER all hardening is applied
 # -----------------------------------------------------------------------------
-echo "[CIS] Initializing AIDE database (file integrity baseline)..."
-aide --init && mv /var/lib/aide/aide.db.new.gz /var/lib/aide/aide.db.gz
+echo "[HARDEN] Initializing AIDE database (file integrity baseline)"
 chmod 750 /etc/cron.daily/aide-check
-echo "[CIS] AIDE database initialized."
+aide --init
+mv /var/lib/aide/aide.db.new.gz /var/lib/aide/aide.db.gz
 
 # -----------------------------------------------------------------------------
-# 9. CLEANUP
+# CLEANUP
 # -----------------------------------------------------------------------------
-echo "[CIS] All post-install hardening complete. Review /root/ks-post-cis.log"
-echo "[CIS] Cleaning up..."
-echo "[CIS] Post-install hardening complete."
-rm -f /root/*
+echo "[CLEANUP] Cleaning up..."
+# TODO
+
+touch /.autorelabel
 %end
