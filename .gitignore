@@ -9,3 +9,5 @@ branding/repodata
 conf/repodata
 rpms
 rpmbuild
+
+.ansible
