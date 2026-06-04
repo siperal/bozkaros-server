@@ -11,3 +11,4 @@ rpms
 rpmbuild
 
 .ansible
+.env
