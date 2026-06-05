@@ -3,6 +3,7 @@ set -euo pipefail
 
 # Run the download inside the clean container
 # Nothing is pre-installed, so --resolve catches ALL real dependencies
+mkdir -p ./pkgs
 podman run --rm \
   -v $(pwd)/pkgs:/output:z \
   rockylinux:10.1.20251123-ubi \
