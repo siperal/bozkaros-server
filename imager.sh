@@ -227,7 +227,7 @@ ssh-keygen -t ed25519 \
 
 # Public keys
 BOZKAROS_PUBLIC_KEY=$(tr -d '\n' < "$WORKDIR/id_bozkaros.pub" | sed 's/[\\&|]/\\&/g')
-sudo sed -i -e "s|^BOZKAROS_PUBLIC_KEY=.*|BOZKAROS_PUBLIC_KEY='${BOZKAROS_PUBLIC_KEY}'|" "${WORKDIR}/.env"
+sudo sed -i -e "s|^BOZKAROS_PUBLIC_KEY=.*|BOZKAROS_PUBLIC_KEY=\"${BOZKAROS_PUBLIC_KEY}\"|" "${WORKDIR}/.env"
 
 echo "Access keys ready"
 
